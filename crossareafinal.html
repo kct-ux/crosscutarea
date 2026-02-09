@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D立體截面探究工具 - 專業教育版</title>
+    <!-- 引入必要的 3D 庫 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --accent: #e74c3c;
+            --bg: #f8f9fa;
+            --panel: rgba(255, 255, 255, 0.9);
+            --base-color: #f1c40f;
+        }
+        body { margin: 0; overflow: hidden; font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif; background: var(--bg); }
+        
+        #ui-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 290px;
+            background: var(--panel);
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            z-index: 100;
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+
+        h1 { font-size: 1.1rem; margin: 0 0 15px 0; color: var(--primary); display: flex; align-items: center; }
+        .control-item { margin-bottom: 20px; }
+        label { display: block; font-size: 0.85rem; font-weight: bold; margin-bottom: 8px; color: #555; }
+        
+        select, button {
+            width: 100%;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            font-size: 0.9rem;
+            cursor: pointer;
+        }
+
+        button {
+            background: var(--primary);
+            color: white;
+            border: none;
+            font-weight: bold;
+            transition: all 0.3s;
+            margin-top: 10px;
+        }
+        button:hover { background: #34495e; transform: translateY(-2px); }
+        button:active { transform: translateY(0); }
+        button:disabled { background: #ccc; cursor: not-allowed; transform: none; }
+        button.secondary { background: #95a5a6; }
+        
+        input[type=range] { width: 100%; cursor: pointer; }
+
+        #cross-section-view {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 180px;
+            height: 180px;
+            background: white;
+            border-radius: 15px;
+            border: 3px solid var(--accent);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            opacity: 0;
+            transform: scale(0.8);
+            transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            pointer-events: none;
+        }
+        
+        #cross-section-view.visible {
+            opacity: 1;
+            transform: scale(1);
+            pointer-events: auto;
+        }
+
+        #section-canvas { width: 150px; height: 150px; }
+        #section-label { font-size: 0.75rem; font-weight: bold; color: var(--accent); margin-bottom: 5px; }
+
+        #legend {
+            margin-top: 15px;
+            font-size: 0.8rem;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .legend-item { display: flex; align-items: center; gap: 8px; }
+        .dot { width: 12px; height: 12px; border-radius: 3px; }
+
+        #hint-box {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--primary);
+            color: white;
+            padding: 12px 25px;
+            border-radius: 30px;
+            font-size: 1.1rem;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            pointer-events: none;
+            transition: opacity 0.5s;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-overlay">
+        <h1>📐 截面探究工具 Pro</h1>
+        
+        <div class="control-item">
+            <label>選擇立體 (Solid Shape)</label>
+            <select id="shapeSelect">
+                <option value="triPrism">1. 三角柱 (Triangular Prism)</option>
+                <option value="cube">2. 四角柱 (底：正方形)</option>
+                <option value="cubeSide">3. 四角柱 (底：長方形)</option>
+                <option value="pentPrism">4. 五角柱 (Pentagonal Prism)</option>
+                <option value="hexPrism">5. 六角柱 (Hexagonal Prism)</option>
+                <option value="cylinder">6. 圓柱體 (Cylinder)</option>
+                <option value="triPyramid">7. 三角錐 (Triangular Pyramid)</option>
+            </select>
+        </div>
+
+        <div class="control-item">
+            <label>切割高度 (Height): <span id="heightVal">50</span>%</label>
+            <input type="range" id="cutHeight" min="10" max="90" value="50">
+        </div>
+
+        <button id="btnAction">✂️ 執行切割 (Cut)</button>
+        <button id="btnReset" class="secondary">🔄 重置 (Reset)</button>
+
+        <div id="legend">
+            <div class="legend-item"><span class="dot" style="background: var(--accent)"></span>紅色：截面 (Cross-section)</div>
+            <div class="legend-item"><span class="dot" style="background: var(--base-color)"></span>黃色：底 (Base)</div>
+        </div>
+
+        <div style="margin-top:20px; font-size: 0.75rem; color: #7f8c8d; line-height:1.5;">
+            <b>主任教學提示：</b><br>
+            第 2 及第 3 題是同一個長方體。當我們換一面作為「底」時，截面的形狀會如何改變？
+        </div>
+    </div>
+
+    <div id="cross-section-view">
+        <div id="section-label">截面圖形 (2D View)</div>
+        <canvas id="section-canvas"></canvas>
+    </div>
+
+    <div id="hint-box">請選擇高度並點擊「執行切割」</div>
+
+    <script>
+        let scene, camera, renderer, controls, shapeGroup;
+        let topMesh, bottomMesh, helperPlane, baseLabel;
+        let isCut = false;
+        let isInitialized = false; 
+        
+        const canvas2D = document.getElementById('section-canvas');
+        const view2D = document.getElementById('cross-section-view');
+        const ctx2D = canvas2D.getContext('2d');
+        canvas2D.width = 300; canvas2D.height = 300;
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xf8f9fa);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(7, 5, 9);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = false; 
+            document.body.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+
+            const ambient = new THREE.AmbientLight(0xffffff, 0.9);
+            scene.add(ambient);
+
+            const sun = new THREE.DirectionalLight(0xffffff, 0.4);
+            sun.position.set(5, 10, 5);
+            scene.add(sun);
+
+            shapeGroup = new THREE.Group();
+            scene.add(shapeGroup);
+            
+            updateModel();
+            draw2DSection();
+            
+            isInitialized = true;
+            animate();
+        }
+
+        function draw2DSection() {
+            const type = document.getElementById('shapeSelect').value;
+            const ratio = document.getElementById('cutHeight').value / 100;
+            ctx2D.clearRect(0, 0, 300, 300);
+            ctx2D.fillStyle = '#e74c3c'; 
+            ctx2D.strokeStyle = '#c0392b';
+            ctx2D.lineWidth = 8;
+
+            const scale = (type === 'triPyramid') ? (1 - ratio) : 1;
+            const centerX = 150;
+            const centerY = 150;
+
+            ctx2D.beginPath();
+            if (type === 'cylinder') {
+                ctx2D.arc(centerX, centerY, 100 * scale, 0, Math.PI * 2);
+            } else if (type === 'cube') {
+                const s = 100 * scale;
+                ctx2D.rect(centerX - s, centerY - s, s * 2, s * 2);
+            } else if (type === 'cubeSide') {
+                const w = 120 * scale;
+                const h = 80 * scale;
+                ctx2D.rect(centerX - w, centerY - h, w * 2, h * 2);
+            } else if (type === 'triPrism' || type === 'triPyramid') {
+                const r = 110 * scale;
+                ctx2D.moveTo(centerX, centerY - r);
+                ctx2D.lineTo(centerX + r * 0.866, centerY + r * 0.5);
+                ctx2D.lineTo(centerX - r * 0.866, centerY + r * 0.5);
+                ctx2D.closePath();
+            } else if (type === 'pentPrism') {
+                const r = 100;
+                for(let i=0; i<5; i++) {
+                    const angle = i * Math.PI * 2 / 5 - Math.PI/2;
+                    const x = centerX + r * Math.cos(angle);
+                    const y = centerY + r * Math.sin(angle);
+                    if(i===0) ctx2D.moveTo(x, y); else ctx2D.lineTo(x, y);
+                }
+                ctx2D.closePath();
+            } else if (type === 'hexPrism') {
+                const r = 100;
+                for(let i=0; i<6; i++) {
+                    const angle = i * Math.PI * 2 / 6 - Math.PI/2;
+                    const x = centerX + r * Math.cos(angle);
+                    const y = centerY + r * Math.sin(angle);
+                    if(i===0) ctx2D.moveTo(x, y); else ctx2D.lineTo(x, y);
+                }
+                ctx2D.closePath();
+            }
+            ctx2D.fill();
+            ctx2D.stroke();
+        }
+
+        function createTextLabel(text) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 512; canvas.height = 256;
+            context.fillStyle = 'rgba(44, 62, 80, 0.7)';
+            context.roundRect(160, 64, 192, 128, 20);
+            context.fill();
+            context.font = 'bold 100px "Microsoft JhengHei", "Noto Sans TC", Arial';
+            context.fillStyle = 'white';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText(text, 256, 128);
+            const texture = new THREE.CanvasTexture(canvas);
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.scale.set(1.5, 0.75, 1);
+            sprite.renderOrder = 999; 
+            return sprite;
+        }
+
+        function updateModel() {
+            while(shapeGroup.children.length > 0) shapeGroup.remove(shapeGroup.children[0]);
+            
+            const type = document.getElementById('shapeSelect').value;
+            const ratio = document.getElementById('cutHeight').value / 100;
+            
+            const totalH = (type === 'cubeSide') ? 2 : 3.5; 
+            const h1 = totalH * ratio;
+            const h2 = totalH * (1 - ratio);
+
+            const sideMat = new THREE.MeshPhongMaterial({ color: 0x3498db, transparent: true, opacity: 0.75, shininess: 0 });
+            const cutMat = new THREE.MeshPhongMaterial({ color: 0xe74c3c });
+            const baseMat = new THREE.MeshPhongMaterial({ color: 0xf1c40f });
+
+            let geo1, geo2;
+            let mats1, mats2;
+
+            if (type === 'cylinder') {
+                geo1 = new THREE.CylinderGeometry(1.2, 1.2, h1, 64);
+                geo2 = new THREE.CylinderGeometry(1.2, 1.2, h2, 64);
+                mats1 = [sideMat, cutMat, baseMat]; mats2 = [sideMat, sideMat, cutMat];
+            } else if (type === 'cube') {
+                geo1 = new THREE.BoxGeometry(2, h1, 2);
+                geo2 = new THREE.BoxGeometry(2, h2, 2);
+                mats1 = [sideMat, sideMat, cutMat, baseMat, sideMat, sideMat]; mats2 = [sideMat, sideMat, sideMat, cutMat, sideMat, sideMat];
+            } else if (type === 'cubeSide') {
+                geo1 = new THREE.BoxGeometry(3.5, h1, 2);
+                geo2 = new THREE.BoxGeometry(3.5, h2, 2);
+                mats1 = [sideMat, sideMat, cutMat, baseMat, sideMat, sideMat]; mats2 = [sideMat, sideMat, sideMat, cutMat, sideMat, sideMat];
+            } else if (type === 'triPrism') {
+                geo1 = new THREE.CylinderGeometry(1.6, 1.6, h1, 3);
+                geo2 = new THREE.CylinderGeometry(1.6, 1.6, h2, 3);
+                mats1 = [sideMat, cutMat, baseMat]; mats2 = [sideMat, sideMat, cutMat];
+            } else if (type === 'pentPrism') {
+                geo1 = new THREE.CylinderGeometry(1.5, 1.5, h1, 5);
+                geo2 = new THREE.CylinderGeometry(1.5, 1.5, h2, 5);
+                mats1 = [sideMat, cutMat, baseMat]; mats2 = [sideMat, sideMat, cutMat];
+            } else if (type === 'hexPrism') {
+                geo1 = new THREE.CylinderGeometry(1.5, 1.5, h1, 6);
+                geo2 = new THREE.CylinderGeometry(1.5, 1.5, h2, 6);
+                mats1 = [sideMat, cutMat, baseMat]; mats2 = [sideMat, sideMat, cutMat];
+            } else if (type === 'triPyramid') {
+                const rBase = 1.8;
+                const rMid = rBase * (1 - ratio);
+                geo1 = new THREE.CylinderGeometry(rMid, rBase, h1, 3);
+                geo2 = new THREE.CylinderGeometry(0, rMid, h2, 3);
+                mats1 = [sideMat, cutMat, baseMat]; mats2 = [sideMat, sideMat, cutMat];
+            }
+
+            bottomMesh = new THREE.Mesh(geo1, mats1);
+            topMesh = new THREE.Mesh(geo2, mats2);
+            bottomMesh.position.y = h1/2 - totalH/2;
+            topMesh.position.y = h1 + h2/2 - totalH/2;
+            
+            [bottomMesh, topMesh].forEach(m => {
+                const line = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), new THREE.LineBasicMaterial({ color: 0x2c3e50, linewidth: 2 }));
+                m.add(line);
+            });
+
+            shapeGroup.add(bottomMesh);
+            shapeGroup.add(topMesh);
+
+            baseLabel = createTextLabel("底");
+            baseLabel.position.set(0, -totalH/2 + 0.1, 0); 
+            shapeGroup.add(baseLabel);
+
+            const pGeo = new THREE.PlaneGeometry(5, 5);
+            const pMat = new THREE.MeshBasicMaterial({ color: 0xe74c3c, transparent: true, opacity: 0.25, side: THREE.DoubleSide });
+            helperPlane = new THREE.Mesh(pGeo, pMat);
+            helperPlane.rotation.x = Math.PI/2;
+            helperPlane.position.y = h1 - totalH/2;
+            shapeGroup.add(helperPlane);
+            
+            if(isCut) helperPlane.visible = false;
+        }
+
+        document.getElementById('btnAction').onclick = () => {
+            if(isCut) return;
+            isCut = true;
+            helperPlane.visible = false;
+            document.getElementById('btnAction').disabled = true;
+            const type = document.getElementById('shapeSelect').value;
+            const msg = (type === 'triPyramid') ? "觀察錐體的截面：它和「底」的大小相同嗎？" : "觀察柱體的截面：它和「底」全等嗎？";
+            document.getElementById('hint-box').innerText = msg;
+            view2D.classList.add('visible');
+            draw2DSection();
+
+            let moveAmount = 0;
+            const targetMove = 2.5; 
+            function animateOpen() {
+                if(moveAmount < targetMove) {
+                    const step = 0.08;
+                    moveAmount += step;
+                    topMesh.position.y += step;
+                    requestAnimationFrame(animateOpen);
+                }
+            }
+            animateOpen();
+        };
+
+        document.getElementById('btnReset').onclick = () => {
+            isCut = false;
+            document.getElementById('btnAction').disabled = false;
+            document.getElementById('hint-box').innerText = "請選擇高度並點擊「執行切割」";
+            view2D.classList.remove('visible');
+            updateModel();
+        };
+
+        document.getElementById('shapeSelect').onchange = () => {
+            isCut = false;
+            document.getElementById('btnAction').disabled = false;
+            view2D.classList.remove('visible');
+            updateModel();
+            draw2DSection();
+        };
+
+        document.getElementById('cutHeight').oninput = (e) => {
+            document.getElementById('heightVal').innerText = e.target.value;
+            if(!isCut) {
+                updateModel();
+                draw2DSection();
+            }
+        };
+
+        function animate() {
+            if (!isInitialized) return; 
+            requestAnimationFrame(animate);
+            if (controls) controls.update(); 
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('load', init);
+        window.onresize = () => {
+            if (!camera || !renderer) return;
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        };
+    </script>
+</body>
+</html>
